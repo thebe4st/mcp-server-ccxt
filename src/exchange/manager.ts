@@ -36,6 +36,32 @@ export function clearExchangeCache(): void {
   log(LogLevel.INFO, 'Exchange cache cleared');
 }
 
+/**
+ * Get API credentials from environment variables
+ * @param exchangeId Exchange ID
+ * @param useSandbox Whether to use sandbox credentials
+ * @returns API credentials object or null if not found
+ */
+export function getCredentialsFromEnv(exchangeId: string, useSandbox: boolean = DEFAULT_USE_SANDBOX): { apiKey: string; secret: string; passphrase?: string } | null {
+  const id = exchangeId.toUpperCase();
+  const prefix = useSandbox ? `${id}_SANDBOX_` : `${id}_`;
+  
+  const apiKey = process.env[`${prefix}API_KEY`];
+  const secret = process.env[`${prefix}SECRET`];
+  
+  if (!apiKey || !secret) {
+    return null;
+  }
+  
+  const passphrase = process.env[`${prefix}PASSPHRASE`];
+  
+  return {
+    apiKey,
+    secret,
+    passphrase: passphrase || undefined
+  };
+}
+
 // Default exchange and market type
 // 默认交易所和市场类型
 export const DEFAULT_EXCHANGE = process.env.DEFAULT_EXCHANGE || 'binance';
