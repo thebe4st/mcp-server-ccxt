@@ -222,47 +222,4 @@ export function registerConfigTools(server: McpServer) {
       };
     }
   });
-  
-  // Set sandbox mode
-  // 设置沙箱模式
-  server.tool("set-sandbox-mode", "Enable or disable sandbox/testnet mode for all exchanges", {
-    enabled: z.boolean().describe("Enable or disable sandbox mode"),
-    clearCache: z.boolean().default(true).describe("Clear exchange cache to apply changes immediately")
-  }, async ({ enabled, clearCache }) => {
-    try {
-      // Set sandbox mode in environment variables
-      process.env.USE_SANDBOX = enabled.toString();
-      log(LogLevel.INFO, `Sandbox mode ${enabled ? 'enabled' : 'disabled'}`);
-      
-      // Clear cache if requested
-      if (clearCache) {
-        clearExchangeCache();
-        log(LogLevel.INFO, "Exchange cache cleared to apply sandbox mode");
-      }
-      
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            success: true,
-            message: `Sandbox mode ${enabled ? 'enabled' : 'disabled'}`,
-            cacheCleared: clearCache,
-            note: clearCache 
-              ? "Exchange cache was cleared. New sandbox mode will be applied immediately."
-              : "Changes will only affect newly created exchange instances. Use clear-exchange-cache tool for immediate effect.",
-            warning: enabled ? "Note: You may need to use sandbox API credentials for exchanges that require them." : ""
-          }, null, 2)
-        }]
-      };
-    } catch (error) {
-      log(LogLevel.ERROR, `Error setting sandbox mode: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
 }
