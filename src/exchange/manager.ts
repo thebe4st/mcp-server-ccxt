@@ -74,6 +74,13 @@ export function getProxyConfig(): { url: string; username?: string; password?: s
     return null;
   }
   
+  try {
+    new URL(url);
+  } catch {
+    log(LogLevel.WARNING, `Invalid proxy URL: ${url}`);
+    return null;
+  }
+  
   const username = process.env.PROXY_USERNAME || undefined;
   const password = process.env.PROXY_PASSWORD || undefined;
   
@@ -154,8 +161,13 @@ export function getExchangeWithMarketType(exchangeId?: string, marketType: Marke
       // Add proxy configuration if enabled
       const proxyConfig = getProxyConfig();
       if (proxyConfig) {
-        options.proxy = formatProxyUrl(proxyConfig);
-        log(LogLevel.INFO, `Using proxy for ${id}`);
+        const proxyUrl = formatProxyUrl(proxyConfig);
+        if (proxyUrl.startsWith('https://')) {
+          options.httpsProxy = proxyUrl;
+        } else {
+          options.httpProxy = proxyUrl;
+        }
+        log(LogLevel.INFO, `Using proxy for ${id}: ${proxyUrl}`);
       }
       
       exchanges[cacheKey] = new (ExchangeClass as any)(options);
@@ -220,8 +232,13 @@ export function getExchangeWithCredentials(
     // Add proxy configuration if enabled
     const proxyConfig = getProxyConfig();
     if (proxyConfig) {
-      options.proxy = formatProxyUrl(proxyConfig);
-      log(LogLevel.INFO, `Using proxy for ${exchangeId} (${type}) with custom credentials`);
+      const proxyUrl = formatProxyUrl(proxyConfig);
+      if (proxyUrl.startsWith('https://')) {
+        options.httpsProxy = proxyUrl;
+      } else {
+        options.httpProxy = proxyUrl;
+      }
+      log(LogLevel.INFO, `Using proxy for ${exchangeId} (${type}) with custom credentials: ${proxyUrl}`);
     }
     
     // Use indexed access to create exchange instance
