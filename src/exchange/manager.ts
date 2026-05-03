@@ -40,6 +40,7 @@ export function clearExchangeCache(): void {
 // 默认交易所和市场类型
 export const DEFAULT_EXCHANGE = process.env.DEFAULT_EXCHANGE || 'binance';
 export const DEFAULT_MARKET_TYPE = process.env.DEFAULT_MARKET_TYPE || 'spot';
+export const DEFAULT_USE_SANDBOX = process.env.USE_SANDBOX === 'true';
 
 // Market types enum
 // 市场类型枚举
@@ -107,10 +108,11 @@ function formatProxyUrl(config: { url: string; username?: string; password?: str
 /**
  * Get exchange instance with the default market type
  * @param exchangeId Exchange ID
+ * @param useSandbox Whether to use sandbox mode
  * @returns Exchange instance
  */
-export function getExchange(exchangeId?: string): ccxt.Exchange {
-  return getExchangeWithMarketType(exchangeId, DEFAULT_MARKET_TYPE as MarketType);
+export function getExchange(exchangeId?: string, useSandbox: boolean = DEFAULT_USE_SANDBOX): ccxt.Exchange {
+  return getExchangeWithMarketType(exchangeId, DEFAULT_MARKET_TYPE as MarketType, useSandbox);
 }
 
 /**
@@ -119,24 +121,24 @@ export function getExchange(exchangeId?: string): ccxt.Exchange {
  * @param marketType Market type (spot, future, etc.)
  * @returns Exchange instance
  */
-export function getExchangeWithMarketType(exchangeId?: string, marketType: MarketType | string = MarketType.SPOT): ccxt.Exchange {
+export function getExchangeWithMarketType(exchangeId?: string, marketType: MarketType | string = MarketType.SPOT, useSandbox: boolean = DEFAULT_USE_SANDBOX): ccxt.Exchange {
   const id = (exchangeId || DEFAULT_EXCHANGE).toLowerCase();
   const type = marketType || DEFAULT_MARKET_TYPE;
   
-  // Create a cache key that includes both exchange ID and market type
-  const cacheKey = `${id}:${type}`;
+  // Create a cache key that includes exchange ID, market type and sandbox status
+  const cacheKey = `${id}:${type}:${useSandbox ? 'sandbox' : 'live'}`;
   
   if (!exchanges[cacheKey]) {
     if (!SUPPORTED_EXCHANGES.includes(id)) {
       throw new Error(`Exchange '${id}' not supported`);
     }
     
-    const apiKey = process.env[`${id.toUpperCase()}_API_KEY`];
-    const secret = process.env[`${id.toUpperCase()}_SECRET`];
-    const passphrase = process.env[`${id.toUpperCase()}_PASSPHRASE`];
+    const apiKey = useSandbox ? process.env[`${id.toUpperCase()}_SANDBOX_API_KEY`] : process.env[`${id.toUpperCase()}_API_KEY`];
+    const secret = useSandbox ? process.env[`${id.toUpperCase()}_SANDBOX_SECRET`] : process.env[`${id.toUpperCase()}_SECRET`];
+    const passphrase = useSandbox ? process.env[`${id.toUpperCase()}_SANDBOX_PASSPHRASE`] : process.env[`${id.toUpperCase()}_PASSPHRASE`];
     
     try {
-      log(LogLevel.INFO, `Initializing exchange: ${id} (${type})`);
+      log(LogLevel.INFO, `Initializing exchange: ${id} (${type})${useSandbox ? ' [sandbox]' : ''}`);
       // Use indexed access to create exchange instance
       const ExchangeClass = ccxt[id as keyof typeof ccxt];
       
@@ -158,6 +160,11 @@ export function getExchangeWithMarketType(exchangeId?: string, marketType: Marke
         options.options.defaultType = type;
       }
       
+      // Enable sandbox mode if requested
+      if (useSandbox) {
+        options.options.sandbox = true;
+      }
+      
       // Add proxy configuration if enabled
       const proxyConfig = getProxyConfig();
       if (proxyConfig) {
@@ -171,8 +178,13 @@ export function getExchangeWithMarketType(exchangeId?: string, marketType: Marke
       }
       
       exchanges[cacheKey] = new (ExchangeClass as any)(options);
+      
+      // Enable sandbox mode after initialization if supported
+      if (useSandbox && exchanges[cacheKey].has.sandbox) {
+        exchanges[cacheKey].setSandboxMode(true);
+      }
     } catch (error) {
-      log(LogLevel.ERROR, `Failed to initialize exchange ${id} (${type}): ${error instanceof Error ? error.message : String(error)}`);
+      log(LogLevel.ERROR, `Failed to initialize exchange ${id} (${type})${useSandbox ? ' [sandbox]' : ''}: ${error instanceof Error ? error.message : String(error)}`);
       throw new Error(`Failed to initialize exchange ${id} (${type}): ${error.message}`);
     }
   }
@@ -202,7 +214,8 @@ export function getExchangeWithCredentials(
   apiKey: string,
   secret: string,
   marketType: MarketType | string = MarketType.SPOT,
-  passphrase?: string
+  passphrase?: string,
+  useSandbox: boolean = DEFAULT_USE_SANDBOX
 ): ccxt.Exchange {
   try {
     if (!SUPPORTED_EXCHANGES.includes(exchangeId)) {
@@ -229,6 +242,11 @@ export function getExchangeWithCredentials(
       options.options.defaultType = type;
     }
     
+    // Enable sandbox mode if requested
+    if (useSandbox) {
+      options.options.sandbox = true;
+    }
+    
     // Add proxy configuration if enabled
     const proxyConfig = getProxyConfig();
     if (proxyConfig) {
@@ -238,14 +256,21 @@ export function getExchangeWithCredentials(
       } else {
         options.httpProxy = proxyUrl;
       }
-      log(LogLevel.INFO, `Using proxy for ${exchangeId} (${type}) with custom credentials: ${proxyUrl}`);
+      log(LogLevel.INFO, `Using proxy for ${exchangeId} (${type}) with custom credentials${useSandbox ? ' [sandbox]' : ''}: ${proxyUrl}`);
     }
     
     // Use indexed access to create exchange instance
     const ExchangeClass = ccxt[exchangeId as keyof typeof ccxt];
-    return new (ExchangeClass as any)(options);
+    const exchange = new (ExchangeClass as any)(options);
+    
+    // Enable sandbox mode after initialization if supported
+    if (useSandbox && exchange.has.sandbox) {
+      exchange.setSandboxMode(true);
+    }
+    
+    return exchange;
   } catch (error) {
-    log(LogLevel.ERROR, `Failed to initialize exchange ${exchangeId} with credentials: ${error instanceof Error ? error.message : String(error)}`);
+    log(LogLevel.ERROR, `Failed to initialize exchange ${exchangeId} with credentials${useSandbox ? ' [sandbox]' : ''}: ${error instanceof Error ? error.message : String(error)}`);
     throw new Error(`Failed to initialize exchange ${exchangeId}: ${error.message}`);
   }
 }
