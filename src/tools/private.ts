@@ -28,9 +28,9 @@ function resolveCredentials(exchange: string, apiKey?: string, secret?: string, 
 }
 
 export function registerPrivateTools(server: McpServer) {
-  // Account balance
-  // 账户余额
-  server.tool("account-balance", "Get your account balance from a crypto exchange", {
+  // Account balance and positions
+  // 账户余额和持仓
+  server.tool("account-balance", "Get your account balance and positions from a crypto exchange", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
     secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
@@ -48,18 +48,46 @@ export function registerPrivateTools(server: McpServer) {
         log(LogLevel.INFO, `Fetching account balance for ${exchange}`);
         const balance = await ex.fetchBalance();
         
+        // Fetch positions if supported
+        let positions = [];
+        if (ex.has.fetchPositions) {
+          try {
+            log(LogLevel.INFO, `Fetching positions for ${exchange}`);
+            positions = await ex.fetchPositions();
+          } catch (posError) {
+            log(LogLevel.WARNING, `Failed to fetch positions for ${exchange}: ${posError instanceof Error ? posError.message : String(posError)}`);
+            positions = [];
+          }
+        }
+        
         // Format the balance for better readability
-        const formattedBalance = {
-          total: balance.total,
-          free: balance.free,
-          used: balance.used,
-          timestamp: new Date(balance.timestamp || Date.now()).toISOString()
+        const result = {
+          balance: {
+            total: balance.total,
+            free: balance.free,
+            used: balance.used,
+            timestamp: new Date(balance.timestamp || Date.now()).toISOString()
+          },
+          positions: positions.map(pos => ({
+            symbol: pos.symbol,
+            side: pos.side,
+            size: pos.contracts || pos.amount,
+            entryPrice: pos.entryPrice,
+            markPrice: pos.markPrice,
+            liquidationPrice: pos.liquidationPrice,
+            leverage: pos.leverage,
+            margin: pos.margin,
+            unrealizedPnl: pos.unrealizedPnl,
+            type: pos.type
+          })),
+          positionsCount: positions.length,
+          marketType: marketType || 'spot'
         };
         
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(formattedBalance, null, 2)
+            text: JSON.stringify(result, null, 2)
           }]
         };
       });
