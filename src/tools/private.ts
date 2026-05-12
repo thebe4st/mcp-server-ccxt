@@ -104,8 +104,8 @@ export function registerPrivateTools(server: McpServer) {
   });
 
   // Place market order
-  // 下市价单
-  server.tool("place-market-order", "Place a market order on an exchange", {
+  // 下市价单 - 使用 ccxt.createOrder
+  server.tool("place-market-order", "Place a market order on an exchange (使用 ccxt.createOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
     side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
@@ -146,8 +146,8 @@ export function registerPrivateTools(server: McpServer) {
   });
 
   // Set leverage
-  // 设置杠杆
-  server.tool("set-leverage", "Set leverage for futures trading", {
+  // 设置杠杆 - 使用 ccxt.setLeverage
+  server.tool("set-leverage", "Set leverage for futures trading (使用 ccxt.setLeverage)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
     leverage: z.number().positive().describe("Leverage value"),
@@ -187,8 +187,8 @@ export function registerPrivateTools(server: McpServer) {
   });
   
   // Set margin mode
-  // 设置保证金模式
-  server.tool("set-margin-mode", "Set margin mode for futures trading", {
+  // 设置保证金模式 - 使用 ccxt.setMarginMode
+  server.tool("set-margin-mode", "Set margin mode for futures trading (使用 ccxt.setMarginMode)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
     marginMode: z.enum(["cross", "isolated"]).describe("Margin mode: cross or isolated"),
@@ -228,8 +228,8 @@ export function registerPrivateTools(server: McpServer) {
   });
   
   // Place futures market order
-  // 下期货市价单
-  server.tool("place-futures-market-order", "Place a futures market order", {
+  // 下期货市价单 - 使用 ccxt.createOrder
+  server.tool("place-futures-market-order", "Place a futures market order (使用 ccxt.createOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
     side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
@@ -270,5 +270,160 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
   
-  // Removed duplicate log message
+  // Place limit order
+  // 下限价单 - 使用 ccxt.createOrder
+  server.tool("place-limit-order", "Place a limit order on an exchange (使用 ccxt.createOrder)", {
+    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
+    side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
+    amount: z.number().positive().describe("Amount to buy/sell"),
+    price: z.number().positive().describe("Limit price"),
+    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
+    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
+    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
+    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
+  }, async ({ exchange, symbol, side, amount, price, apiKey, secret, passphrase, marketType }) => {
+    try {
+      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        
+        log(LogLevel.INFO, `Placing ${side} limit order for ${symbol} on ${exchange}, amount: ${amount}, price: ${price}`);
+        const order = await ex.createOrder(symbol, 'limit', side, amount, price);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(order, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error placing limit order: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error placing limit order: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  // Cancel order
+  // 取消订单 - 使用 ccxt.cancelOrder
+  server.tool("cancel-order", "Cancel an open order on an exchange (使用 ccxt.cancelOrder)", {
+    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
+    orderId: z.string().describe("Order ID to cancel"),
+    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
+    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
+    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
+    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
+  }, async ({ exchange, symbol, orderId, apiKey, secret, passphrase, marketType }) => {
+    try {
+      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        
+        log(LogLevel.INFO, `Cancelling order ${orderId} for ${symbol} on ${exchange}`);
+        const result = await ex.cancelOrder(orderId, symbol);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error cancelling order: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error cancelling order: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  // Fetch order
+  // 获取订单详情 - 使用 ccxt.fetchOrder
+  server.tool("fetch-order", "Fetch a single order by ID (使用 ccxt.fetchOrder)", {
+    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
+    orderId: z.string().describe("Order ID to fetch"),
+    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
+    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
+    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
+    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
+  }, async ({ exchange, symbol, orderId, apiKey, secret, passphrase, marketType }) => {
+    try {
+      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        
+        log(LogLevel.INFO, `Fetching order ${orderId} for ${symbol} on ${exchange}`);
+        const order = await ex.fetchOrder(orderId, symbol);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(order, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error fetching order: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error fetching order: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  // Fetch open orders
+  // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
+  server.tool("fetch-open-orders", "Fetch all open orders (使用 ccxt.fetchOpenOrders)", {
+    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
+    symbol: z.string().optional().describe("Trading pair symbol (e.g., BTC/USDT). If not provided, fetches all open orders"),
+    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
+    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
+    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
+    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
+  }, async ({ exchange, symbol, apiKey, secret, passphrase, marketType }) => {
+    try {
+      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        
+        log(LogLevel.INFO, `Fetching open orders for ${symbol || 'all symbols'} on ${exchange}`);
+        const orders = await ex.fetchOpenOrders(symbol || undefined);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(orders, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error fetching open orders: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error fetching open orders: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
 }
