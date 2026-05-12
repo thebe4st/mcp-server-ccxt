@@ -294,47 +294,6 @@ export function registerPublicTools(server: McpServer) {
       };
     }
   });
-
-  // Get futures leverage tiers
-  // 获取期货杠杆级别
-  server.tool("get-leverage-tiers", "Get futures leverage tiers for trading pairs", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
-    symbol: z.string().optional().describe("Trading pair symbol (optional, e.g., BTC/USDT)"),
-    marketType: z.enum(["future", "swap"]).default("future").describe("Market type (default: future)")
-  }, async ({ exchange, symbol, marketType }) => {
-    try {
-      return await rateLimiter.execute(exchange, async () => {
-        // Get futures exchange
-        const ex = getExchangeWithMarketType(exchange, marketType);
-        const cacheKey = `leverage_tiers:${exchange}:${marketType}:${symbol || 'all'}`;
-        
-        const tiers = await getCachedData(cacheKey, async () => {
-          log(LogLevel.INFO, `Fetching leverage tiers for ${symbol || 'all symbols'} on ${exchange} (${marketType})`);
-          if (symbol) {
-            return await ex.fetchMarketLeverageTiers(symbol);
-          } else {
-            return await ex.fetchLeverageTiers();
-          }
-        }, 3600000); // Cache for 1 hour
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(tiers, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error fetching leverage tiers: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
   
   // Get funding rates
   // 获取资金费率

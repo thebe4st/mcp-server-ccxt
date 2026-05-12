@@ -32,13 +32,10 @@ export function registerPrivateTools(server: McpServer) {
   // 账户余额和持仓
   server.tool("account-balance", "Get your account balance and positions from a crypto exchange", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
     marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, apiKey, secret, passphrase, marketType }) => {
+  }, async ({ exchange, marketType }) => {
     try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
         // Get exchange with market type
@@ -102,103 +99,19 @@ export function registerPrivateTools(server: McpServer) {
       };
     }
   });
-
-  // Place market order
-  // 下市价单 - 使用 ccxt.createOrder
-  server.tool("place-market-order", "Place a market order on an exchange (使用 ccxt.createOrder)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
-    side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
-    amount: z.number().positive().describe("Amount to buy/sell"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, side, amount, apiKey, secret, passphrase, marketType }) => {
-    try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
-      
-      return await rateLimiter.execute(exchange, async () => {
-        // Get exchange with market type
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
-        
-        // Place market order
-        log(LogLevel.INFO, `Placing ${side} market order for ${symbol} on ${exchange}, amount: ${amount}`);
-        const order = await ex.createOrder(symbol, 'market', side, amount);
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(order, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error placing market order: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error placing market order: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
-
-  // Set leverage
-  // 设置杠杆 - 使用 ccxt.setLeverage
-  server.tool("set-leverage", "Set leverage for futures trading (使用 ccxt.setLeverage)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
-    leverage: z.number().positive().describe("Leverage value"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["future", "swap"]).default("future").describe("Market type (default: future)")
-  }, async ({ exchange, symbol, leverage, apiKey, secret, passphrase, marketType }) => {
-    try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
-      
-      return await rateLimiter.execute(exchange, async () => {
-        // Get futures exchange
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
-        
-        // Set leverage
-        log(LogLevel.INFO, `Setting leverage to ${leverage}x for ${symbol} on ${exchange} (${marketType})`);
-        const result = await ex.setLeverage(leverage, symbol);
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error setting leverage: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
   
   // Set margin mode
   // 设置保证金模式 - 使用 ccxt.setMarginMode
-  server.tool("set-margin-mode", "Set margin mode for futures trading (使用 ccxt.setMarginMode)", {
+  server.tool("set-position-mode", "Set position mode for swap trading, both cross and isolated, leverage value", {
     exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     marginMode: z.enum(["cross", "isolated"]).describe("Margin mode: cross or isolated"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["future", "swap"]).default("future").describe("Market type (default: future)")
-  }, async ({ exchange, symbol, marginMode, apiKey, secret, passphrase, marketType }) => {
+    marketType: z.enum(["swap"]).default("swap").describe("Market type (default: swap)"),
+    leverage: z.number().positive().min(1).max(5).describe("Leverage value (default: 3x)").default(3),
+    positionSide: z.enum(["long", "short"]).describe("Position side: long or short")
+  }, async ({ exchange, symbol, marginMode, marketType, leverage, positionSide }) => {
     try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
         // Get futures exchange
@@ -206,7 +119,11 @@ export function registerPrivateTools(server: McpServer) {
         
         // Set margin mode
         log(LogLevel.INFO, `Setting margin mode to ${marginMode} for ${symbol} on ${exchange} (${marketType})`);
-        const result = await ex.setMarginMode(marginMode, symbol);
+        const params = {
+          "lever": leverage || 3,
+          "posSide": positionSide
+        };
+        const result = await ex.setMarginMode(marginMode, symbol, params);
         
         return {
           content: [{
@@ -227,109 +144,22 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
   
-  // Place futures market order
-  // 下期货市价单 - 使用 ccxt.createOrder
-  server.tool("place-futures-market-order", "Place a futures market order (使用 ccxt.createOrder)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
-    side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
-    amount: z.number().positive().describe("Amount to buy/sell"),
-    params: z.record(z.any()).optional().describe("Additional order parameters"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["future", "swap"]).default("future").describe("Market type (default: future)")
-  }, async ({ exchange, symbol, side, amount, params, apiKey, secret, passphrase, marketType }) => {
-    try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
-      
-      return await rateLimiter.execute(exchange, async () => {
-        // Get futures exchange
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
-        
-        // Place futures market order
-        log(LogLevel.INFO, `Placing futures ${side} market order for ${symbol} on ${exchange} (${marketType}), amount: ${amount}`);
-        const order = await ex.createOrder(symbol, 'market', side, amount, undefined, params || {});
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(order, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error placing futures market order: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
-  
-  // Place limit order
-  // 下限价单 - 使用 ccxt.createOrder
-  server.tool("place-limit-order", "Place a limit order on an exchange (使用 ccxt.createOrder)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
-    side: z.enum(['buy', 'sell']).describe("Order side: buy or sell"),
-    amount: z.number().positive().describe("Amount to buy/sell"),
-    price: z.number().positive().describe("Limit price"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, side, amount, price, apiKey, secret, passphrase, marketType }) => {
-    try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
-      
-      return await rateLimiter.execute(exchange, async () => {
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
-        
-        log(LogLevel.INFO, `Placing ${side} limit order for ${symbol} on ${exchange}, amount: ${amount}, price: ${price}`);
-        const order = await ex.createOrder(symbol, 'limit', side, amount, price);
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(order, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error placing limit order: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error placing limit order: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
 
   // Cancel order
   // 取消订单 - 使用 ccxt.cancelOrder
   server.tool("cancel-order", "Cancel an open order on an exchange (使用 ccxt.cancelOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
     orderId: z.string().describe("Order ID to cancel"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
     marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, orderId, apiKey, secret, passphrase, marketType }) => {
+  }, async ({ exchange, orderId, marketType }) => {
     try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
         
-        log(LogLevel.INFO, `Cancelling order ${orderId} for ${symbol} on ${exchange}`);
-        const result = await ex.cancelOrder(orderId, symbol);
+        log(LogLevel.INFO, `Cancelling order ${orderId} on ${exchange}`);
+        const result = await ex.cancelOrder(orderId);
         
         return {
           content: [{
@@ -350,57 +180,15 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
 
-  // Fetch order
-  // 获取订单详情 - 使用 ccxt.fetchOrder
-  server.tool("fetch-order", "Fetch a single order by ID (使用 ccxt.fetchOrder)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT)"),
-    orderId: z.string().describe("Order ID to fetch"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, orderId, apiKey, secret, passphrase, marketType }) => {
-    try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
-      
-      return await rateLimiter.execute(exchange, async () => {
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
-        
-        log(LogLevel.INFO, `Fetching order ${orderId} for ${symbol} on ${exchange}`);
-        const order = await ex.fetchOrder(orderId, symbol);
-        
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(order, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error fetching order: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error fetching order: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
-
   // Fetch open orders
   // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
   server.tool("fetch-open-orders", "Fetch all open orders (使用 ccxt.fetchOpenOrders)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     symbol: z.string().optional().describe("Trading pair symbol (e.g., BTC/USDT). If not provided, fetches all open orders"),
-    apiKey: z.string().optional().describe("API key for authentication (uses environment variable if not provided)"),
-    secret: z.string().optional().describe("API secret for authentication (uses environment variable if not provided)"),
-    passphrase: z.string().optional().describe("Passphrase for authentication (required for some exchanges like KuCoin)"),
     marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, apiKey, secret, passphrase, marketType }) => {
+  }, async ({ exchange, symbol, marketType }) => {
     try {
-      const credentials = resolveCredentials(exchange, apiKey, secret, passphrase);
+      const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);

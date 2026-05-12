@@ -15,28 +15,6 @@ import { getProxyConfig, clearExchangeCache } from '../exchange/manager.js';
  * @param server MCP server instance
  */
 export function registerConfigTools(server: McpServer) {
-  // Get proxy configuration
-  // 获取代理配置
-  server.tool("get-proxy-config", "Get the current proxy configuration", {}, 
-    async () => {
-      const useProxy = process.env.USE_PROXY === 'true';
-      const proxyUrl = process.env.PROXY_URL || '';
-      const proxyUsername = process.env.PROXY_USERNAME || '';
-      // Don't return the password for security reasons
-      
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            enabled: useProxy,
-            url: proxyUrl,
-            username: proxyUsername,
-            isConfigured: useProxy && !!proxyUrl
-          }, null, 2)
-        }]
-      };
-    }
-  );
 
   // Set proxy configuration
   // 设置代理配置
@@ -56,11 +34,11 @@ export function registerConfigTools(server: McpServer) {
         process.env.PROXY_URL = url;
       }
       
-      if (username !== undefined) {
+      if (username != '') {
         process.env.PROXY_USERNAME = username;
       }
       
-      if (password !== undefined) {
+      if (password != '') {
         process.env.PROXY_PASSWORD = password;
       }
       
@@ -86,62 +64,6 @@ export function registerConfigTools(server: McpServer) {
       };
     } catch (error) {
       log(LogLevel.ERROR, `Error updating proxy configuration: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
-
-  // Test proxy connection
-  // 测试代理连接
-  server.tool("test-proxy-connection", "Test the proxy connection with a specified exchange", {
-    exchange: z.string().describe("Exchange ID to test connection with (e.g., binance)"),
-  }, async ({ exchange }) => {
-    try {
-      const useProxy = process.env.USE_PROXY === 'true';
-      if (!useProxy) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              message: "Proxy is not enabled. Enable it first with set-proxy-config"
-            }, null, 2)
-          }]
-        };
-      }
-      
-      const proxyConfig = getProxyConfig();
-      if (!proxyConfig) {
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: false,
-              message: "Proxy is enabled but not properly configured"
-            }, null, 2)
-          }]
-        };
-      }
-      
-      // Since we can't create a standalone test here without potentially affecting 
-      // the exchange cache, we'll just return the current configuration
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify({
-            message: "Proxy configuration looks valid",
-            proxyUrl: proxyConfig.url,
-            note: "To test actual connectivity, try fetching data from an exchange using one of the other tools"
-          }, null, 2)
-        }]
-      };
-    } catch (error) {
-      log(LogLevel.ERROR, `Error testing proxy: ${error instanceof Error ? error.message : String(error)}`);
       return {
         content: [{
           type: "text",
