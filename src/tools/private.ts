@@ -143,7 +143,7 @@ export function registerPrivateTools(server: McpServer) {
 
   // Cancel order
   // 取消订单 - 使用 ccxt.cancelOrder
-  server.tool("cancel-order", "Cancel an open order on an exchange (使用 ccxt.cancelOrder)", {
+  server.tool("cancel-order", "Cancel an open order on an exchange (use ccxt.cancelOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     orderId: z.string().describe("Order ID to cancel"),
@@ -178,7 +178,7 @@ export function registerPrivateTools(server: McpServer) {
 
   // Fetch open orders
   // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
-  server.tool("fetch-open-orders", "Fetch all open orders (使用 ccxt.fetchOpenOrders)", {
+  server.tool("fetch-open-orders", "Fetch all open orders (use ccxt.fetchOpenOrders)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     symbol: z.string().optional().describe("Trading pair symbol (e.g., BTC/USDT). If not provided, fetches all open orders"),
   }, async ({ exchange, symbol }) => {
@@ -284,6 +284,62 @@ export function registerPrivateTools(server: McpServer) {
         content: [{
           type: "text",
           text: `Error creating order: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  // Close OKX position
+  // 平仓 OKX 合约持仓
+  server.tool("close-okx-position", "Close a position on OKX exchange (use ccxt.createOrder)", {
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
+    type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
+    positionSide: z.enum(["long", "short"]).describe("Position side to close: long or short"),
+    amount: z.number().positive().describe("Quantity to close (contracts)"),
+    price: z.number().positive().optional().describe("Limit price (required for limit orders)"),
+  }, async ({ symbol, type, positionSide, amount, price }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+        
+        if (type === "limit" && !price) {
+          throw new Error("Price is required for limit orders");
+        }
+        
+        const side = positionSide === "long" ? "sell" : "buy";
+        
+        log(LogLevel.INFO, `Closing ${positionSide} position: ${type} ${side} order for ${amount} ${symbol} on ${exchange}`);
+        if (price) {
+          log(LogLevel.INFO, `Limit price: ${price}`);
+        }
+        
+        const params: any = {
+          tdMode: "isolated",
+          posSide: positionSide,
+          ordType: type,
+          px: price,
+          side: side,
+        };
+        
+        const result = await ex.createOrder(symbol, type, side, amount, price, params);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error closing position: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error closing position: ${error instanceof Error ? error.message : String(error)}`
         }],
         isError: true
       };
