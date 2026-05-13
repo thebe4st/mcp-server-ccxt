@@ -140,14 +140,14 @@ export function registerPrivateTools(server: McpServer) {
       };
     }
   });
-  
 
   // Cancel order
   // 取消订单 - 使用 ccxt.cancelOrder
   server.tool("cancel-order", "Cancel an open order on an exchange (使用 ccxt.cancelOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     orderId: z.string().describe("Order ID to cancel"),
-  }, async ({ exchange, orderId }) => {
+  }, async ({ exchange, symbol, orderId }) => {
     try {
       const credentials = resolveCredentials(exchange);
       
@@ -155,7 +155,7 @@ export function registerPrivateTools(server: McpServer) {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
         
         log(LogLevel.INFO, `Cancelling order ${orderId} on ${exchange}`);
-        const result = await ex.cancelOrder(orderId);
+        const result = await ex.cancelOrder(orderId, symbol || undefined);
         
         return {
           content: [{
@@ -204,6 +204,86 @@ export function registerPrivateTools(server: McpServer) {
         content: [{
           type: "text",
           text: `Error fetching open orders: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  // Create contract order
+  // 创建合约订单 - 使用 ccxt.createOrder
+  server.tool("create-okx-position", "Create a contract order on an exchange,marginMode: isolated, ", {
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
+    type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
+    positionSide: z.enum(["long", "short"]).describe("Position side: long or short"),
+    amount: z.number().positive().describe("Order quantity (contracts)"),
+    price: z.number().positive().optional().describe("Limit price (required for limit orders)"),
+    takeProfit: z.number().positive().describe("Take profit price"),
+    stopLoss: z.number().positive().describe("Stop loss price"),
+    leverage: z.number().positive().min(1).max(5).optional().describe("Leverage value (default: 1x)").default(1),
+  }, async ({ symbol, type, positionSide, amount, price, takeProfit, stopLoss, leverage }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+        
+        if (type === "limit" && !price) {
+          throw new Error("Price is required for limit orders");
+        }
+        const side = positionSide === "long" ? "buy" : "sell";
+        
+        log(LogLevel.INFO, `Creating ${type} ${side} order for ${amount} ${symbol} on ${exchange}`);
+        if (price) {
+          log(LogLevel.INFO, `Limit price: ${price}`);
+        }
+        if (takeProfit) {
+          log(LogLevel.INFO, `Take profit: ${takeProfit}`);
+        }
+        if (stopLoss) {
+          log(LogLevel.INFO, `Stop loss: ${stopLoss}`);
+        }
+
+        const marginModeParam: any = {
+          lever: leverage,
+          mgnMode: "isolated",
+          posSide: positionSide
+        }
+        await ex.setMarginMode("isolated", symbol, marginModeParam);
+       
+        const params: any = {
+          tdMode: "isolated",
+          posSide: positionSide,
+          ordType: type,
+          px: price,
+          side: side,
+          attachAlgoOrds: [
+            {
+              tpTriggerPx: takeProfit,
+              tpOrdPx: -1,
+              slTriggerPx: stopLoss,
+              slOrdPx: -1,
+            }
+          ]
+        };
+        
+        
+        const result = await ex.createOrder(symbol, type, side, amount, price, params);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error creating order: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error creating order: ${error instanceof Error ? error.message : String(error)}`
         }],
         isError: true
       };
