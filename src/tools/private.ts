@@ -216,7 +216,7 @@ export function registerPrivateTools(server: McpServer) {
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
     positionSide: z.enum(["long", "short"]).describe("Position side: long or short"),
-    amount: z.number().positive().describe("Order quantity (contracts)"),
+    amount: z.number().positive().describe("Order quantity (contracts)，It's not the quantity of virtual currency, but the number of shares on the exchange, which needs to be converted"),
     price: z.number().positive().optional().describe("Limit price (required for limit orders)"),
     takeProfit: z.number().positive().describe("Take profit price"),
     stopLoss: z.number().positive().describe("Stop loss price"),
@@ -296,7 +296,7 @@ export function registerPrivateTools(server: McpServer) {
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
     positionSide: z.enum(["long", "short"]).describe("Position side to close: long or short"),
-    amount: z.number().positive().describe("Quantity to close (contracts)"),
+    amount: z.number().positive().describe("Quantity to close (contracts)，It's not the quantity of virtual currency, but the number of shares on the exchange, which needs to be converted"),
     price: z.number().positive().optional().describe("Limit price (required for limit orders)"),
   }, async ({ symbol, type, positionSide, amount, price }) => {
     try {
