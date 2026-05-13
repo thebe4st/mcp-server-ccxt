@@ -13,19 +13,6 @@ import { rateLimiter } from '../utils/rate-limiter.js';
 import { log, LogLevel } from '../utils/logging.js';
 
 export function registerPublicTools(server: McpServer) {
-  // List supported exchanges
-  // 列出支持的交易所
-  server.tool("list-exchanges", "List all available cryptocurrency exchanges", {}, 
-    async () => {
-      return {
-        content: [{
-          type: "text",
-          text: JSON.stringify(SUPPORTED_EXCHANGES, null, 2)
-        }]
-      };
-    }
-  );
-
   // Get ticker information
   // 获取行情信息
   server.tool("get-ticker", "Get current ticker information for a trading pair", {
