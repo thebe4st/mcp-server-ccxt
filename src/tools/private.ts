@@ -32,14 +32,13 @@ export function registerPrivateTools(server: McpServer) {
   // 账户余额和持仓
   server.tool("account-balance", "Get your account balance and positions from a crypto exchange", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, marketType }) => {
+  }, async ({ exchange }) => {
     try {
       const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
         // Get exchange with market type
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
         
         // Fetch balance
         log(LogLevel.INFO, `Fetching account balance for ${exchange}`);
@@ -77,8 +76,7 @@ export function registerPrivateTools(server: McpServer) {
             unrealizedPnl: pos.unrealizedPnl,
             type: pos.type
           })),
-          positionsCount: positions.length,
-          marketType: marketType || 'spot'
+          positionsCount: positions.length
         };
         
         return {
@@ -106,22 +104,21 @@ export function registerPrivateTools(server: McpServer) {
     exchange: z.string().describe("Exchange ID (e.g., binance, bybit)"),
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     marginMode: z.enum(["cross", "isolated"]).describe("Margin mode: cross or isolated"),
-    marketType: z.enum(["swap"]).default("swap").describe("Market type (default: swap)"),
     leverage: z.number().positive().min(1).max(5).describe("Leverage value (default: 3x)").default(3),
     positionSide: z.enum(["long", "short"]).describe("Position side: long or short")
-  }, async ({ exchange, symbol, marginMode, marketType, leverage, positionSide }) => {
+  }, async ({ exchange, symbol, marginMode, leverage, positionSide }) => {
     try {
       const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
-        // Get futures exchange
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
         
         // Set margin mode
-        log(LogLevel.INFO, `Setting margin mode to ${marginMode} for ${symbol} on ${exchange} (${marketType})`);
+        log(LogLevel.INFO, `Setting margin mode to ${marginMode} for ${symbol} on ${exchange}`);
         const params = {
           "lever": leverage || 3,
-          "posSide": positionSide
+          "posSide": positionSide,
+          "mgnMode": marginMode
         };
         const result = await ex.setMarginMode(marginMode, symbol, params);
         
@@ -150,13 +147,12 @@ export function registerPrivateTools(server: McpServer) {
   server.tool("cancel-order", "Cancel an open order on an exchange (使用 ccxt.cancelOrder)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     orderId: z.string().describe("Order ID to cancel"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, orderId, marketType }) => {
+  }, async ({ exchange, orderId }) => {
     try {
       const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
         
         log(LogLevel.INFO, `Cancelling order ${orderId} on ${exchange}`);
         const result = await ex.cancelOrder(orderId);
@@ -185,13 +181,12 @@ export function registerPrivateTools(server: McpServer) {
   server.tool("fetch-open-orders", "Fetch all open orders (使用 ccxt.fetchOpenOrders)", {
     exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
     symbol: z.string().optional().describe("Trading pair symbol (e.g., BTC/USDT). If not provided, fetches all open orders"),
-    marketType: z.enum(["spot", "future", "swap", "option", "margin"]).optional().describe("Market type (default: spot)")
-  }, async ({ exchange, symbol, marketType }) => {
+  }, async ({ exchange, symbol }) => {
     try {
       const credentials = resolveCredentials(exchange);
       
       return await rateLimiter.execute(exchange, async () => {
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, marketType, credentials.passphrase);
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
         
         log(LogLevel.INFO, `Fetching open orders for ${symbol || 'all symbols'} on ${exchange}`);
         const orders = await ex.fetchOpenOrders(symbol || undefined);

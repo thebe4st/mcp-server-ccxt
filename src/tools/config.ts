@@ -18,7 +18,7 @@ export function registerConfigTools(server: McpServer) {
 
   // Set proxy configuration
   // 设置代理配置
-  server.tool("set-proxy-config", "Configure proxy settings for all exchanges", {
+  server.tool("set-proxy-config", "Configure proxy settings for all exchanges and clear exchange cache", {
     enabled: z.boolean().describe("Enable or disable proxy"),
     clearCache: z.boolean().default(true).describe("Clear exchange cache to apply changes immediately")
   }, async ({ enabled, clearCache }) => {
@@ -58,33 +58,4 @@ export function registerConfigTools(server: McpServer) {
       };
     }
   });
-
-  // Clear exchange cache
-  // 清除交易所缓存
-  server.tool("clear-exchange-cache", "Clear exchange instance cache to apply configuration changes", {}, 
-    async () => {
-      try {
-        clearExchangeCache();
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              message: "Exchange cache cleared successfully",
-              note: "New exchange instances will be created with current configuration"
-            }, null, 2)
-          }]
-        };
-      } catch (error) {
-        log(LogLevel.ERROR, `Error clearing exchange cache: ${error instanceof Error ? error.message : String(error)}`);
-        return {
-          content: [{
-            type: "text",
-            text: `Error: ${error instanceof Error ? error.message : String(error)}`
-          }],
-          isError: true
-        };
-      }
-    }
-  );
 }
