@@ -537,6 +537,55 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
 
+  // Cancel position stop loss and take profit
+  // 取消持仓的止盈止损订单
+  server.tool("okx-cancel-position-sl-tp", "Cancel stop loss and take profit orders for a position on OKX", {
+    algoId: z.string().describe("Algorithm order ID to cancel"),
+  }, async ({ algoId }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+        
+        log(LogLevel.INFO, `Finding algo order ${algoId}`);
+        const algoOrder = await findAlgoOrderByAlgoId(algoId);
+        
+        if (!algoOrder) {
+          throw new Error(`Algo order with ID ${algoId} not found`);
+        }
+        
+        const instId = algoOrder.instId;
+        
+        log(LogLevel.INFO, `Canceling algo order ${algoId} on ${instId}`);
+        
+        const params: any = {
+          instId: instId,
+          algoId: algoId,
+        };
+        
+        const result = await (ex as ccxt.okx).privatePostTradeCancelAlgos(params);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
   // Modify position stop loss and take profit
   // 修改持仓的止盈止损价格
   server.tool("okx-modify-position-sl-tp", "Modify stop loss and take profit prices for a position on OKX (使用 privatePostTradeAmendAlgos)", {
@@ -584,7 +633,7 @@ export function registerPrivateTools(server: McpServer) {
           params.newSlTriggerPx = String(newStopLoss);
         }
         
-        const result = await (ex as any).privatePostTradeAmendAlgos(params);
+        const result = await (ex as ccxt.okx).privatePostTradeAmendAlgos(params);
         
         return {
           content: [{
