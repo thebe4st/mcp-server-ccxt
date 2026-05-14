@@ -382,13 +382,13 @@ export function registerPrivateTools(server: McpServer) {
 
   // Close OKX position
   // 平仓 OKX 合约持仓
-  server.tool("close-okx-position", "Close a position on OKX exchange (use ccxt.createOrder)", {
+  server.tool("okx-close-position", "Close a position on OKX exchange, You can control the number of positions closed by specifying sz", {
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
     positionSide: z.enum(["long", "short"]).describe("Position side to close: long or short"),
-    amount: z.number().positive().describe("Quantity to close (contracts)，It's not the quantity of virtual currency, but the number of shares on the exchange, which needs to be converted"),
+    sz: z.number().positive().describe("Quantity to close (contracts)，It's not the quantity of virtual currency, but the number of shares on the exchange, which needs to be converted"),
     price: z.number().positive().optional().describe("Limit price (required for limit orders)"),
-  }, async ({ symbol, type, positionSide, amount, price }) => {
+  }, async ({ symbol, type, positionSide, sz, price }) => {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
@@ -402,7 +402,7 @@ export function registerPrivateTools(server: McpServer) {
 
         const side = positionSide === "long" ? "sell" : "buy";
 
-        log(LogLevel.INFO, `Closing ${positionSide} position: ${type} ${side} order for ${amount} ${symbol} on ${exchange}`);
+        log(LogLevel.INFO, `Closing ${positionSide} position: ${type} ${side} order for ${sz} ${symbol} on ${exchange}`);
         if (price) {
           log(LogLevel.INFO, `Limit price: ${price}`);
         }
@@ -415,7 +415,7 @@ export function registerPrivateTools(server: McpServer) {
           side: side,
         };
 
-        const result = await ex.createOrder(symbol, type, side, amount, price, params);
+        const result = await ex.createOrder(symbol, type, side, sz, price, params);
 
         return {
           content: [{
