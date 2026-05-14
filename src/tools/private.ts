@@ -10,6 +10,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { getExchangeWithCredentials, MarketType, getCredentialsFromEnv, DEFAULT_USE_SANDBOX } from '../exchange/manager.js';
 import { log, LogLevel } from '../utils/logging.js';
 import { rateLimiter } from '../utils/rate-limiter.js';
+import * as ccxt from 'ccxt';
 
 /**
  * Helper function to resolve credentials from params or environment variables
@@ -18,12 +19,12 @@ function resolveCredentials(exchange: string, apiKey?: string, secret?: string, 
   if (apiKey && secret) {
     return { apiKey, secret, passphrase: passphrase || undefined };
   }
-  
+
   const envCredentials = getCredentialsFromEnv(exchange, DEFAULT_USE_SANDBOX);
   if (envCredentials) {
     return { ...envCredentials, passphrase: passphrase || envCredentials.passphrase };
   }
-  
+
   throw new Error(`No API credentials provided for ${exchange}. Please either provide apiKey/secret parameters or set ${exchange.toUpperCase()}_API_KEY and ${exchange.toUpperCase()}_SECRET environment variables.`);
 }
 
@@ -35,15 +36,15 @@ export function registerPrivateTools(server: McpServer) {
   }, async ({ exchange }) => {
     try {
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         // Get exchange with market type
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         // Fetch balance
         log(LogLevel.INFO, `Fetching account balance for ${exchange}`);
         const balance = await ex.fetchBalance();
-        
+
         // Fetch positions if supported
         let positions = [];
         if (ex.has.fetchPositions) {
@@ -55,7 +56,7 @@ export function registerPrivateTools(server: McpServer) {
             positions = [];
           }
         }
-        
+
         // Format the balance for better readability
         const result = {
           balance: {
@@ -78,7 +79,7 @@ export function registerPrivateTools(server: McpServer) {
           })),
           positionsCount: positions.length
         };
-        
+
         return {
           content: [{
             type: "text",
@@ -97,7 +98,7 @@ export function registerPrivateTools(server: McpServer) {
       };
     }
   });
-  
+
   // Set margin mode
   // 设置保证金模式 - 使用 ccxt.setMarginMode
   server.tool("set-position-mode", "Set position mode for swap trading, both cross and isolated, leverage value", {
@@ -109,10 +110,10 @@ export function registerPrivateTools(server: McpServer) {
   }, async ({ exchange, symbol, marginMode, leverage, positionSide }) => {
     try {
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         // Set margin mode
         log(LogLevel.INFO, `Setting margin mode to ${marginMode} for ${symbol} on ${exchange}`);
         const params = {
@@ -121,7 +122,7 @@ export function registerPrivateTools(server: McpServer) {
           "mgnMode": marginMode
         };
         const result = await ex.setMarginMode(marginMode, symbol, params);
-        
+
         return {
           content: [{
             type: "text",
@@ -150,13 +151,13 @@ export function registerPrivateTools(server: McpServer) {
   }, async ({ exchange, symbol, orderId }) => {
     try {
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         log(LogLevel.INFO, `Cancelling order ${orderId} on ${exchange}`);
         const result = await ex.cancelOrder(orderId, symbol || undefined);
-        
+
         return {
           content: [{
             type: "text",
@@ -176,25 +177,58 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
 
+  async function getOkxAlgoOrders(okxEx: ccxt.okx) {
+    const params = {
+      'instType': 'SWAP',
+      'ordType': 'oco'
+    }
+    const algoOrdersResponse = await okxEx.privateGetTradeOrdersAlgoPending(params);
+    if (algoOrdersResponse.code != "0") {
+      throw new Error(algoOrdersResponse.msg);
+    }
+    const algoOrders = algoOrdersResponse.data;
+
+    // algoOrders只需要这几个字段：algoId，last，lever，posSide，side，slTriggerPx，tpTriggerPx，uTime
+    return algoOrders.map(order => ({
+      algoId: order.algoId,
+      last: order.last,
+      lever: order.lever,
+      posSide: order.posSide,
+      side: order.side,
+      slTriggerPx: order.slTriggerPx,
+      tpTriggerPx: order.tpTriggerPx,
+      uTime: order.uTime,
+      instId: order.instId,
+      instType: order.instType
+    }));
+  }
+
   // Fetch open orders
   // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
-  server.tool("fetch-open-orders", "Fetch all open orders (use ccxt.fetchOpenOrders)", {
-    exchange: z.string().describe("Exchange ID (e.g., binance, coinbase)"),
-    symbol: z.string().optional().describe("Trading pair symbol (e.g., BTC/USDT). If not provided, fetches all open orders"),
-  }, async ({ exchange, symbol }) => {
+  server.tool("fetch-okx-open-orders", "Fetch all open orders (use ccxt.fetchOpenOrders)", {
+  }, async ({ }) => {
     try {
+      const exchange = 'okx';
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
-        log(LogLevel.INFO, `Fetching open orders for ${symbol || 'all symbols'} on ${exchange}`);
-        const orders = await ex.fetchOpenOrders(symbol || undefined);
-        
+
+        log(LogLevel.INFO, `Fetching open orders on ${exchange}`);
+
+        // 转换ex为okx实例
+        const okxEx = ex as ccxt.okx;
+        const algoOrdersToKeep = await getOkxAlgoOrders(okxEx);
+        const orders = await ex.fetchOpenOrders(undefined, undefined, undefined);
+
+        const result = {
+          "orders": orders,
+          "algoOrders": algoOrdersToKeep,
+        }
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(orders, null, 2)
+            text: JSON.stringify(result, null, 2)
           }]
         };
       });
@@ -225,15 +259,15 @@ export function registerPrivateTools(server: McpServer) {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         if (type === "limit" && !price) {
           throw new Error("Price is required for limit orders");
         }
         const side = positionSide === "long" ? "buy" : "sell";
-        
+
         log(LogLevel.INFO, `Creating ${type} ${side} order for ${amount} ${symbol} on ${exchange}`);
         if (price) {
           log(LogLevel.INFO, `Limit price: ${price}`);
@@ -251,7 +285,7 @@ export function registerPrivateTools(server: McpServer) {
           posSide: positionSide
         }
         await ex.setMarginMode("isolated", symbol, marginModeParam);
-       
+
         const params: any = {
           tdMode: "isolated",
           posSide: positionSide,
@@ -267,10 +301,17 @@ export function registerPrivateTools(server: McpServer) {
             }
           ]
         };
-        
-        
-        const result = await ex.createOrder(symbol, type, side, amount, price, params);
-        
+
+
+        const createOrderResult = await ex.createOrder(symbol, type, side, amount, price, params);
+        // 下单完成后 获取algoOrders
+        const algoOrdersToKeep = await getOkxAlgoOrders(ex as ccxt.okx);
+
+        const result = {
+          "createResult": createOrderResult,
+          "algoOrders": algoOrdersToKeep,
+        }
+
         return {
           content: [{
             type: "text",
@@ -302,21 +343,21 @@ export function registerPrivateTools(server: McpServer) {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         if (type === "limit" && !price) {
           throw new Error("Price is required for limit orders");
         }
-        
+
         const side = positionSide === "long" ? "sell" : "buy";
-        
+
         log(LogLevel.INFO, `Closing ${positionSide} position: ${type} ${side} order for ${amount} ${symbol} on ${exchange}`);
         if (price) {
           log(LogLevel.INFO, `Limit price: ${price}`);
         }
-        
+
         const params: any = {
           tdMode: "isolated",
           posSide: positionSide,
@@ -324,9 +365,9 @@ export function registerPrivateTools(server: McpServer) {
           px: price,
           side: side,
         };
-        
+
         const result = await ex.createOrder(symbol, type, side, amount, price, params);
-        
+
         return {
           content: [{
             type: "text",
