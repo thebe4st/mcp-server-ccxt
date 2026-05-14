@@ -12,6 +12,58 @@ import { log, LogLevel } from '../utils/logging.js';
 import { rateLimiter } from '../utils/rate-limiter.js';
 import * as ccxt from 'ccxt';
 
+export class OkxAlgoOrder {
+  algoId: string;
+  instId: string;
+  instType: string;
+  ordType: string;
+  side: string;
+  posSide: string;
+  tpTriggerPx?: string;
+  slTriggerPx?: string;
+  status: string;
+  createTime: string;
+
+  constructor(data: {
+    algoId: string;
+    instId: string;
+    instType: string;
+    ordType: string;
+    side: string;
+    posSide: string;
+    tpTriggerPx?: string;
+    slTriggerPx?: string;
+    status: string;
+    createTime: string;
+  }) {
+    this.algoId = data.algoId;
+    this.instId = data.instId;
+    this.instType = data.instType;
+    this.ordType = data.ordType;
+    this.side = data.side;
+    this.posSide = data.posSide;
+    this.tpTriggerPx = data.tpTriggerPx;
+    this.slTriggerPx = data.slTriggerPx;
+    this.status = data.status;
+    this.createTime = data.createTime;
+  }
+
+  static fromApiResponse(item: any): OkxAlgoOrder {
+    return new OkxAlgoOrder({
+      algoId: item.algoId,
+      instId: item.instId,
+      instType: item.instType,
+      ordType: item.ordType,
+      side: item.side,
+      posSide: item.posSide,
+      tpTriggerPx: item.tpTriggerPx,
+      slTriggerPx: item.slTriggerPx,
+      status: item.status,
+      createTime: item.createTime,
+    });
+  }
+}
+
 /**
  * Helper function to resolve credentials from params or environment variables
  */
@@ -26,6 +78,30 @@ function resolveCredentials(exchange: string, apiKey?: string, secret?: string, 
   }
 
   throw new Error(`No API credentials provided for ${exchange}. Please either provide apiKey/secret parameters or set ${exchange.toUpperCase()}_API_KEY and ${exchange.toUpperCase()}_SECRET environment variables.`);
+}
+
+export async function getOkxAlgoOrders(instId?: string): Promise<OkxAlgoOrder[]> {
+  const exchange = "okx";
+  const credentials = resolveCredentials(exchange);
+  const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+  
+  const params: any = {};
+  if (instId) {
+    params.instId = instId;
+  }
+  
+  const result = await (ex as any).privateGetTradeAlgoOrders(params);
+  
+  if (result && result.data && Array.isArray(result.data)) {
+    return result.data.map((item: any) => OkxAlgoOrder.fromApiResponse(item));
+  }
+  
+  return [];
+}
+
+export async function findAlgoOrderByAlgoId(algoId: string): Promise<OkxAlgoOrder | undefined> {
+  const orders = await getOkxAlgoOrders();
+  return orders.find(order => order.algoId === algoId);
 }
 
 export function registerPrivateTools(server: McpServer) {
@@ -205,7 +281,7 @@ export function registerPrivateTools(server: McpServer) {
 
   // Fetch open orders
   // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
-  server.tool("fetch-okx-open-orders", "Fetch all open orders (use ccxt.fetchOpenOrders)", {
+  server.tool("okx-fetch-orders", "Fetch all open orders", {
   }, async ({ }) => {
     try {
       const exchange = 'okx';
@@ -246,7 +322,7 @@ export function registerPrivateTools(server: McpServer) {
 
   // Create contract order
   // 创建合约订单 - 使用 ccxt.createOrder
-  server.tool("create-okx-position", "Create a contract order on an exchange,marginMode: isolated, ", {
+  server.tool("okx-create-position", "Create a contract order on an exchange,marginMode: isolated, ", {
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     type: z.enum(["limit", "market"]).describe("Order type: limit or market"),
     positionSide: z.enum(["long", "short"]).describe("Position side: long or short"),
@@ -381,6 +457,76 @@ export function registerPrivateTools(server: McpServer) {
         content: [{
           type: "text",
           text: `Error closing position: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
+
+  
+
+  // Modify position stop loss and take profit
+  // 修改持仓的止盈止损价格
+  server.tool("okx-modify-position-sl-tp", "Modify stop loss and take profit prices for a position on OKX (使用 privatePostTradeAmendAlgos)", {
+    algoId: z.string().describe("Algorithm order ID, from okx-fetch-open-orders"),
+    newTakeProfit: z.number().positive().optional().describe("New take profit price"),
+    newStopLoss: z.number().positive().optional().describe("New stop loss price"),
+  }, async ({ algoId, newTakeProfit, newStopLoss }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+        
+        if (!newTakeProfit && !newStopLoss) {
+          throw new Error("At least one of newTakeProfit or newStopLoss must be provided");
+        }
+        
+        log(LogLevel.INFO, `Finding algo order ${algoId}`);
+        const algoOrder = await findAlgoOrderByAlgoId(algoId);
+        
+        if (!algoOrder) {
+          throw new Error(`Algo order with ID ${algoId} not found`);
+        }
+        
+        const instId = algoOrder.instId;
+        
+        log(LogLevel.INFO, `Modifying SL/TP for algo order ${algoId} on ${instId}`);
+        if (newTakeProfit) {
+          log(LogLevel.INFO, `New take profit: ${newTakeProfit}`);
+        }
+        if (newStopLoss) {
+          log(LogLevel.INFO, `New stop loss: ${newStopLoss}`);
+        }
+        
+        const params: any = {
+          instId: instId,
+          algoId: algoId,
+        };
+        
+        if (newTakeProfit) {
+          params.newTpTriggerPx = String(newTakeProfit);
+        }
+        if (newStopLoss) {
+          params.newSlTriggerPx = String(newStopLoss);
+        }
+        
+        const result = await (ex as any).privatePostTradeAmendAlgos(params);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error modifying SL/TP: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error modifying SL/TP: ${error instanceof Error ? error.message : String(error)}`
         }],
         isError: true
       };
