@@ -512,52 +512,52 @@ export function registerPrivateTools(server: McpServer) {
 
   // Cancel position stop loss and take profit
   // 取消持仓的止盈止损订单
-  server.tool("okx-cancel-position-sl-tp", "Cancel stop loss and take profit orders for a position on OKX", {
-    algoId: z.string().describe("Algorithm order ID to cancel"),
-  }, async ({ algoId }) => {
-    try {
-      const exchange = "okx";
-      const credentials = resolveCredentials(exchange);
+  // server.tool("okx-cancel-position-sl-tp", "Cancel stop loss and take profit orders for a position on OKX", {
+  //   algoId: z.string().describe("Algorithm order ID to cancel"),
+  // }, async ({ algoId }) => {
+  //   try {
+  //     const exchange = "okx";
+  //     const credentials = resolveCredentials(exchange);
 
-      return await rateLimiter.execute(exchange, async () => {
-        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+  //     return await rateLimiter.execute(exchange, async () => {
+  //       const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
 
-        log(LogLevel.INFO, `Finding algo order ${algoId}`);
-        const algoOrder = await findAlgoOrderByAlgoId(ex as ccxt.okx, algoId);
+  //       log(LogLevel.INFO, `Finding algo order ${algoId}`);
+  //       const algoOrder = await findAlgoOrderByAlgoId(ex as ccxt.okx, algoId);
 
-        if (!algoOrder) {
-          throw new Error(`Algo order with ID ${algoId} not found`);
-        }
+  //       if (!algoOrder) {
+  //         throw new Error(`Algo order with ID ${algoId} not found`);
+  //       }
 
-        const instId = algoOrder.instId;
+  //       const instId = algoOrder.instId;
 
-        log(LogLevel.INFO, `Canceling algo order ${algoId} on ${instId}`);
+  //       log(LogLevel.INFO, `Canceling algo order ${algoId} on ${instId}`);
 
-        const params: any = {
-          instId: instId,
-          algoId: algoId,
-        };
+  //       const params: any = {
+  //         instId: instId,
+  //         algoId: algoId,
+  //       };
 
-        const result = await (ex as ccxt.okx).privatePostTradeCancelAlgos(params);
+  //       const result = await (ex as ccxt.okx).privatePostTradeCancelAlgos(params);
 
-        return {
-          content: [{
-            type: "text",
-            text: JSON.stringify(result, null, 2)
-          }]
-        };
-      });
-    } catch (error) {
-      log(LogLevel.ERROR, `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`);
-      return {
-        content: [{
-          type: "text",
-          text: `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`
-        }],
-        isError: true
-      };
-    }
-  });
+  //       return {
+  //         content: [{
+  //           type: "text",
+  //           text: JSON.stringify(result, null, 2)
+  //         }]
+  //       };
+  //     });
+  //   } catch (error) {
+  //     log(LogLevel.ERROR, `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`);
+  //     return {
+  //       content: [{
+  //         type: "text",
+  //         text: `Error canceling SL/TP: ${error instanceof Error ? error.message : String(error)}`
+  //       }],
+  //       isError: true
+  //     };
+  //   }
+  // });
 
   // Modify position stop loss and take profit
   // 修改持仓的止盈止损价格
@@ -565,7 +565,8 @@ export function registerPrivateTools(server: McpServer) {
     algoId: z.string().describe("Algorithm order ID, from okx-fetch-open-orders"),
     newTakeProfit: z.number().positive().optional().describe("New take profit price"),
     newStopLoss: z.number().positive().optional().describe("New stop loss price"),
-  }, async ({ algoId, newTakeProfit, newStopLoss }) => {
+    newSz: z.number().positive().optional().describe("New order size/quantity"),
+  }, async ({ algoId, newTakeProfit, newStopLoss, newSz }) => {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
@@ -573,8 +574,8 @@ export function registerPrivateTools(server: McpServer) {
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
 
-        if (!newTakeProfit && !newStopLoss) {
-          throw new Error("At least one of newTakeProfit or newStopLoss must be provided");
+        if (!newTakeProfit && !newStopLoss && !newSz) {
+          throw new Error("At least one of newTakeProfit, newStopLoss, or newSz must be provided");
         }
 
         log(LogLevel.INFO, `Finding algo order ${algoId}`);
@@ -593,6 +594,9 @@ export function registerPrivateTools(server: McpServer) {
         if (newStopLoss) {
           log(LogLevel.INFO, `New stop loss: ${newStopLoss}`);
         }
+        if (newSz) {
+          log(LogLevel.INFO, `New size: ${newSz}`);
+        }
 
         const params: any = {
           instId: instId,
@@ -605,8 +609,11 @@ export function registerPrivateTools(server: McpServer) {
         if (newStopLoss) {
           params.newSlTriggerPx = String(newStopLoss);
         }
+        if (newSz) {
+          params.newSz = String(newSz);
+        }
 
-        const result = await (ex as ccxt.okx).privatePostTradeAmendAlgos(params);
+        const result = await (ex as any).privatePostTradeAmendAlgos(params);
 
         return {
           content: [{
