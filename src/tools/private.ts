@@ -463,7 +463,79 @@ export function registerPrivateTools(server: McpServer) {
     }
   });
 
-  
+  // Set position stop loss and take profit
+  // 设置持仓的止盈止损价格
+  server.tool("okx-set-position-sl-tp", "Set stop loss and take profit for a position on OKX ", {
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
+    posSide: z.enum(["long", "short"]).describe("Position side: long or short"),
+    takeProfit: z.number().positive().describe("Take profit price"),
+    stopLoss: z.number().positive().describe("Stop loss price"),
+    sz: z.number().positive().describe("Quantity to close (contracts)，It's not the quantity of virtual currency, but the number of shares on the exchange, which needs to be converted"),
+  }, async ({ symbol, posSide, takeProfit, stopLoss, sz }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+      
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+        
+        if (!takeProfit && !stopLoss && !sz) {
+          throw new Error("At least one of takeProfit, stopLoss, or sz must be provided");
+        }
+        
+        log(LogLevel.INFO, `Setting SL/TP for ${posSide} position on ${symbol}`);
+        if (takeProfit) {
+          log(LogLevel.INFO, `Take profit: ${takeProfit}`);
+        }
+        if (stopLoss) {
+          log(LogLevel.INFO, `Stop loss: ${stopLoss}`);
+        }
+        if (sz) {
+          log(LogLevel.INFO, `Quantity: ${sz}`);
+        }
+        
+        const side = posSide === "long" ? "sell" : "buy";
+        
+        const params: any = {
+          instId: symbol.replace("/", "-").replace(":USDT", "-SWAP"),
+          tdMode: "isolated",
+          side: side,
+          posSide: posSide,
+          ordType: 'oco',
+          sz: String(sz),
+          cxlOnClosePos: true,
+          reduceOnly: true,
+        };
+        
+        if (takeProfit) {
+          params.tpTriggerPx = String(takeProfit);
+          params.tpOrdPx = -1;
+        }
+        if (stopLoss) {
+          params.slTriggerPx = String(stopLoss);
+          params.slOrdPx = -1;
+        }
+        
+        const result = await (ex as any).privateTradeOrderAlgo(params);
+        
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error setting SL/TP: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error setting SL/TP: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
 
   // Modify position stop loss and take profit
   // 修改持仓的止盈止损价格
