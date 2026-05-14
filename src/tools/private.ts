@@ -80,27 +80,26 @@ function resolveCredentials(exchange: string, apiKey?: string, secret?: string, 
   throw new Error(`No API credentials provided for ${exchange}. Please either provide apiKey/secret parameters or set ${exchange.toUpperCase()}_API_KEY and ${exchange.toUpperCase()}_SECRET environment variables.`);
 }
 
-export async function getOkxAlgoOrders(instId?: string): Promise<OkxAlgoOrder[]> {
-  const exchange = "okx";
-  const credentials = resolveCredentials(exchange);
-  const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-  
-  const params: any = {};
-  if (instId) {
-    params.instId = instId;
+
+export async function getOkxAlgoOrders(okxEx: ccxt.okx) {
+  const params = {
+    'instType': 'SWAP',
+    'ordType': 'oco'
   }
-  
-  const result = await (ex as any).privateGetTradeAlgoOrders(params);
-  
-  if (result && result.data && Array.isArray(result.data)) {
-    return result.data.map((item: any) => OkxAlgoOrder.fromApiResponse(item));
+  const algoOrdersResponse = await okxEx.privateGetTradeOrdersAlgoPending(params);
+  if (algoOrdersResponse.code != "0") {
+    throw new Error(algoOrdersResponse.msg);
   }
-  
+  const algoOrders = algoOrdersResponse.data;
+  if (algoOrdersResponse && algoOrdersResponse.data && Array.isArray(algoOrdersResponse.data)) {
+    return algoOrdersResponse.data.map((item: any) => OkxAlgoOrder.fromApiResponse(item));
+  }
   return [];
+
 }
 
-export async function findAlgoOrderByAlgoId(algoId: string): Promise<OkxAlgoOrder | undefined> {
-  const orders = await getOkxAlgoOrders();
+export async function findAlgoOrderByAlgoId(okxEx: ccxt.okx, algoId: string): Promise<OkxAlgoOrder | undefined> {
+  const orders = await getOkxAlgoOrders(okxEx);
   return orders.find(order => order.algoId === algoId);
 }
 
@@ -252,32 +251,6 @@ export function registerPrivateTools(server: McpServer) {
       };
     }
   });
-
-  async function getOkxAlgoOrders(okxEx: ccxt.okx) {
-    const params = {
-      'instType': 'SWAP',
-      'ordType': 'oco'
-    }
-    const algoOrdersResponse = await okxEx.privateGetTradeOrdersAlgoPending(params);
-    if (algoOrdersResponse.code != "0") {
-      throw new Error(algoOrdersResponse.msg);
-    }
-    const algoOrders = algoOrdersResponse.data;
-
-    // algoOrders只需要这几个字段：algoId，last，lever，posSide，side，slTriggerPx，tpTriggerPx，uTime
-    return algoOrders.map(order => ({
-      algoId: order.algoId,
-      last: order.last,
-      lever: order.lever,
-      posSide: order.posSide,
-      side: order.side,
-      slTriggerPx: order.slTriggerPx,
-      tpTriggerPx: order.tpTriggerPx,
-      uTime: order.uTime,
-      instId: order.instId,
-      instType: order.instType
-    }));
-  }
 
   // Fetch open orders
   // 获取开放订单列表 - 使用 ccxt.fetchOpenOrders
@@ -465,7 +438,7 @@ export function registerPrivateTools(server: McpServer) {
 
   // Set position stop loss and take profit
   // 设置持仓的止盈止损价格
-  server.tool("okx-set-position-sl-tp", "Set stop loss and take profit for a position on OKX ", {
+  server.tool("okx-put-position-sl-tp", "Set stop loss and take profit for a position on OKX ", {
     symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
     posSide: z.enum(["long", "short"]).describe("Position side: long or short"),
     takeProfit: z.number().positive().describe("Take profit price"),
@@ -475,14 +448,14 @@ export function registerPrivateTools(server: McpServer) {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         if (!takeProfit && !stopLoss && !sz) {
           throw new Error("At least one of takeProfit, stopLoss, or sz must be provided");
         }
-        
+
         log(LogLevel.INFO, `Setting SL/TP for ${posSide} position on ${symbol}`);
         if (takeProfit) {
           log(LogLevel.INFO, `Take profit: ${takeProfit}`);
@@ -493,9 +466,9 @@ export function registerPrivateTools(server: McpServer) {
         if (sz) {
           log(LogLevel.INFO, `Quantity: ${sz}`);
         }
-        
+
         const side = posSide === "long" ? "sell" : "buy";
-        
+
         const params: any = {
           instId: symbol.replace("/", "-").replace(":USDT", "-SWAP"),
           tdMode: "isolated",
@@ -506,7 +479,7 @@ export function registerPrivateTools(server: McpServer) {
           cxlOnClosePos: true,
           reduceOnly: true,
         };
-        
+
         if (takeProfit) {
           params.tpTriggerPx = String(takeProfit);
           params.tpOrdPx = -1;
@@ -515,9 +488,9 @@ export function registerPrivateTools(server: McpServer) {
           params.slTriggerPx = String(stopLoss);
           params.slOrdPx = -1;
         }
-        
-        const result = await (ex as any).privateTradeOrderAlgo(params);
-        
+
+        const result = await (ex as ccxt.okx  ).privatePostTradeOrderAlgo(params);
+
         return {
           content: [{
             type: "text",
@@ -545,28 +518,28 @@ export function registerPrivateTools(server: McpServer) {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         log(LogLevel.INFO, `Finding algo order ${algoId}`);
-        const algoOrder = await findAlgoOrderByAlgoId(algoId);
-        
+        const algoOrder = await findAlgoOrderByAlgoId(ex as ccxt.okx, algoId);
+
         if (!algoOrder) {
           throw new Error(`Algo order with ID ${algoId} not found`);
         }
-        
+
         const instId = algoOrder.instId;
-        
+
         log(LogLevel.INFO, `Canceling algo order ${algoId} on ${instId}`);
-        
+
         const params: any = {
           instId: instId,
           algoId: algoId,
         };
-        
+
         const result = await (ex as ccxt.okx).privatePostTradeCancelAlgos(params);
-        
+
         return {
           content: [{
             type: "text",
@@ -596,23 +569,23 @@ export function registerPrivateTools(server: McpServer) {
     try {
       const exchange = "okx";
       const credentials = resolveCredentials(exchange);
-      
+
       return await rateLimiter.execute(exchange, async () => {
         const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
-        
+
         if (!newTakeProfit && !newStopLoss) {
           throw new Error("At least one of newTakeProfit or newStopLoss must be provided");
         }
-        
+
         log(LogLevel.INFO, `Finding algo order ${algoId}`);
-        const algoOrder = await findAlgoOrderByAlgoId(algoId);
-        
+        const algoOrder = await findAlgoOrderByAlgoId(ex as ccxt.okx, algoId);
+
         if (!algoOrder) {
           throw new Error(`Algo order with ID ${algoId} not found`);
         }
-        
+
         const instId = algoOrder.instId;
-        
+
         log(LogLevel.INFO, `Modifying SL/TP for algo order ${algoId} on ${instId}`);
         if (newTakeProfit) {
           log(LogLevel.INFO, `New take profit: ${newTakeProfit}`);
@@ -620,21 +593,21 @@ export function registerPrivateTools(server: McpServer) {
         if (newStopLoss) {
           log(LogLevel.INFO, `New stop loss: ${newStopLoss}`);
         }
-        
+
         const params: any = {
           instId: instId,
           algoId: algoId,
         };
-        
+
         if (newTakeProfit) {
           params.newTpTriggerPx = String(newTakeProfit);
         }
         if (newStopLoss) {
           params.newSlTriggerPx = String(newStopLoss);
         }
-        
+
         const result = await (ex as ccxt.okx).privatePostTradeAmendAlgos(params);
-        
+
         return {
           content: [{
             type: "text",
