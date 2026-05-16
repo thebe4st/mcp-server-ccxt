@@ -489,7 +489,7 @@ export function registerPrivateTools(server: McpServer) {
           params.slOrdPx = -1;
         }
 
-        const result = await (ex as ccxt.okx  ).privatePostTradeOrderAlgo(params);
+        const result = await (ex as ccxt.okx).privatePostTradeOrderAlgo(params);
 
         return {
           content: [{
@@ -558,6 +558,73 @@ export function registerPrivateTools(server: McpServer) {
   //     };
   //   }
   // });
+
+  // Set trailing stop for position
+  // 设置持仓的追踪止损
+  server.tool("okx-put-trailing-stop", "Set trailing stop for a position on OKX", {
+    symbol: z.string().describe("Trading pair symbol (e.g., BTC/USDT:USDT)"),
+    posSide: z.enum(["long", "short"]).describe("Position side: long or short"),
+    callbackPercent: z.string().describe("Callback percentage for trailing stop (e.g., 0.05 for 5%)"),
+    activationPrice: z.number().positive().optional().describe("Activation price for trailing stop, if not provided, it will be activated immediately after placing an order."),
+    sz: z.number().positive().describe("Quantity to close (contracts)"),
+  }, async ({ symbol, posSide, callbackPercent, activationPrice, sz }) => {
+    try {
+      const exchange = "okx";
+      const credentials = resolveCredentials(exchange);
+
+      return await rateLimiter.execute(exchange, async () => {
+        const ex = getExchangeWithCredentials(exchange, credentials.apiKey, credentials.secret, MarketType.SWAP, credentials.passphrase);
+
+        log(LogLevel.INFO, `Setting trailing stop for ${posSide} position on ${symbol}`);
+        log(LogLevel.INFO, `Callback percent: ${callbackPercent}%`);
+        log(LogLevel.INFO, `Activation price: ${activationPrice}`);
+        log(LogLevel.INFO, `Quantity: ${sz}`);
+        
+        // 解析回调百分比为浮点数
+        const callbackPercentFloat = parseFloat(callbackPercent);
+        if (isNaN(callbackPercentFloat)) {
+          throw new Error(`Invalid callback percent: ${callbackPercent}`);
+        }
+
+        const side = posSide === "long" ? "sell" : "buy";
+
+        const params: any = {
+          instId: symbol.replace("/", "-").replace(":USDT", "-SWAP"),
+          tdMode: "isolated",
+          side: side,
+          posSide: posSide,
+          ordType: 'move_order_stop',
+          sz: String(sz),
+          cxlOnClosePos: true,
+          reduceOnly: true,
+          callbackRatio: String(callbackPercentFloat),
+        };
+
+        // 如果提供了激活价格，则使用激活价格，如果没有，则立即激活
+        if (activationPrice) {
+          params.activePx = String(activationPrice);
+        }
+
+        const result = await (ex as ccxt.okx).privatePostTradeOrderAlgo(params);
+
+        return {
+          content: [{
+            type: "text",
+            text: JSON.stringify(result, null, 2)
+          }]
+        };
+      });
+    } catch (error) {
+      log(LogLevel.ERROR, `Error setting trailing stop: ${error instanceof Error ? error.message : String(error)}`);
+      return {
+        content: [{
+          type: "text",
+          text: `Error setting trailing stop: ${error instanceof Error ? error.message : String(error)}`
+        }],
+        isError: true
+      };
+    }
+  });
 
   // Modify position stop loss and take profit
   // 修改持仓的止盈止损价格
