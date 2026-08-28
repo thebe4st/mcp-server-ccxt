@@ -25,11 +25,35 @@ export const SUPPORTED_EXCHANGES = [
 // 交易所实例缓存
 const exchanges: Record<string, ccxt.Exchange> = {};
 
+// Markets refresh timers for long-running processes
+// 常驻进程的 markets 定时刷新器（交易所上新币后无需重启即可获取）
+const marketRefreshTimers: Record<string, NodeJS.Timeout> = {};
+// Refresh interval in minutes, configurable via MARKETS_REFRESH_MINUTES (min 5)
+// 刷新间隔（分钟），可通过环境变量 MARKETS_REFRESH_MINUTES 配置（最小5分钟）
+const MARKETS_REFRESH_TTL = Math.max(5, parseInt(process.env.MARKETS_REFRESH_MINUTES || '60', 10)) * 60 * 1000;
+
+function scheduleMarketRefresh(cacheKey: string, ex: ccxt.Exchange): void {
+  if (marketRefreshTimers[cacheKey]) return;
+  const timer = setInterval(() => {
+    ex.loadMarkets(true)
+      .then(() => log(LogLevel.INFO, `Markets refreshed for ${cacheKey}`))
+      .catch((err: any) => log(LogLevel.WARNING, `Failed to refresh markets for ${cacheKey}: ${err instanceof Error ? err.message : String(err)}`));
+  }, MARKETS_REFRESH_TTL);
+  // Avoid keeping the Node.js process alive just for the timer
+  // 避免定时器阻止 Node 进程退出
+  timer.unref?.();
+  marketRefreshTimers[cacheKey] = timer;
+}
+
 /**
  * Clear exchange instance cache
  * This is useful when proxy or other configurations change
  */
 export function clearExchangeCache(): void {
+  Object.keys(marketRefreshTimers).forEach(key => {
+    clearInterval(marketRefreshTimers[key]);
+    delete marketRefreshTimers[key];
+  });
   Object.keys(exchanges).forEach(key => {
     delete exchanges[key];
   });
@@ -204,6 +228,10 @@ export function getExchangeWithMarketType(exchangeId?: string, marketType: Marke
       }
       
       exchanges[cacheKey] = new (ExchangeClass as any)(options);
+      
+      // Keep markets fresh so newly listed symbols become available without restart
+      // 定时刷新 markets，使新上线的交易对无需重启即可使用
+      scheduleMarketRefresh(cacheKey, exchanges[cacheKey]);
       
       // Enable sandbox mode after initialization if supported
       if (useSandbox && exchanges[cacheKey].has.sandbox) {

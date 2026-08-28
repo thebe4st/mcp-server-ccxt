@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.8.0",
-    "ccxt": "^4.4.71",
+    "ccxt": "^4.5.58",
     "dotenv": "^16.3.1",
     "https-proxy-agent": "^9.0.0",
     "lru-cache": "^10.0.1",
